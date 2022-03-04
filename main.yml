@@ -1,0 +1,88 @@
+---
+- hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    # Getting the current state of the EC2 instance
+    - name: check currenct state of the instance
+      command: aws ec2 describe-instances --instance-ids {{ instance_id }} --region {{ region }} --output text --query 'Reservations[*].Instances[*].State.Name'
+      register: pre_instance_state
+    - debug:
+        msg: "{{ pre_instance_state }}"
+    - debug:
+        msg: "Instance is already stopped"
+      when: pre_instance_state.stdout == "stopped"
+      ignore_errors: yes
+    
+    # getting the previous instance type 
+    - name: get instance type of the instance
+      command: aws ec2 describe-instances --instance-ids {{ instance_id }} --region {{ region }} --output text --query 'Reservations[*].Instances[*].InstanceType'
+      register: pre_instance_type
+    - debug:
+        msg: "{{ pre_instance_type }}"
+    - fail:
+        msg: "Instance type is already in same type"
+      when: pre_instance_type.stdout == instance_type
+    
+    # AWS Instances Stopping
+    - name: Stopping the aws ec2 instance
+      command: aws ec2 stop-instances --instance-ids {{ instance_id }} --region {{ region }}
+      register: check_stop_instance_state
+      when: pre_instance_state.stdout != "stopped"
+    - name: wait to stopping the instance
+      wait_for:
+        timeout: 120
+      when: check_stop_instance_state != ""
+    - debug:
+        msg: "Instance stopped successfully"
+      when: check_stop_instance_state.changed == true
+    
+    # Getting the current state of the EC2 instance
+    - name: check instance state after instance is stopped
+      command: aws ec2 describe-instances --instance-ids {{ instance_id }} --region {{ region }} --output text --query 'Reservations[*].Instances[*].State.Name'
+      register: check_post_stop_state
+    - debug:
+        msg: "{{ check_post_stop_state }}"
+    - debug:
+        msg: "Instance is stopped"
+      when: check_post_stop_state.stdout == "stopped"    
+   
+    # Resizing or modifying the instance type
+    - name: modifying the instance type
+      command: aws ec2 modify-instance-attribute --instance-id {{ instance_id }} --region {{ region }} --instance-type {{ instance_type }}
+      register: change_instance_type
+
+    - name: status of changing the instance type is failed
+      fail:
+        msg: "Failed to change the instance type"
+      when: change_instance_type.changed != true
+
+    # checking the current instance type 
+    - name: get instance type of the instance after resize
+      command: aws ec2 describe-instances --instance-ids {{ instance_id }} --region {{ region }} --output text --query 'Reservations[*].Instances[*].InstanceType'
+      register: post_instance_type
+    - debug:
+        msg: "{{ post_instance_type }}"
+    - debug:
+        msg: "Instance type modified successfully"
+      when: pre_instance_type.stdout != instance_type 
+    - fail:
+        msg: "Instance is already in same instance type"
+      when: pre_instance_type.stdout == instance_type
+    
+    # starting the ec2 instance after resize
+    - name: Starting the aws ec2 instance after resize
+      command: aws ec2 start-instances --instance-ids {{ instance_id }} --region {{ region }}
+      register: post_instance_state
+      when: check_post_stop_state.stdout != "running"
+    - name: wait to stopping the instance
+      wait_for:
+        timeout: 120
+    - debug:
+        msg: "Instance started successfully"
+      when: post_instance_state.changed == true
+
+
+
+    
+      
